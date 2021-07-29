@@ -96,7 +96,6 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
     assert len(names) == nc, f'{len(names)} names found for nc={nc} dataset in {data}'  # check
     is_coco = data.endswith('coco.yaml') and nc == 80  # COCO dataset
 
-
     # Model
     pretrained = weights.endswith('.pt')
     if pretrained:
@@ -365,6 +364,41 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
             loggers.on_train_val_end(mloss, results, lr, epoch, best_fitness, fi)
 
             # Save model
+            newfi = fi[0]
+            f2 = f"{newfi:.3f}"
+            f3 = float(f2)*1000
+            curr_score = f"{int(f3):0>3}"
+            for subdir,dirs,files in os.walk(w):
+                file_epochs = []
+                file_scores = []
+                filepaths = []
+                for filename in files:
+                    if filename != "last.pt" and filename != "best.pt":
+                        file_epochs.append(filename.split('/')[-1].split('_')[0])
+                        file_scores.append(filename.split('/')[-1].split('_')[1])
+                        filepaths.append(subdir+os.sep+filename)
+                if len(filepaths) > int(opt.save_no):
+                    oldest_file = filepaths[file_scores.index(min(file_scores))]
+                    os.remove(oldest_file)
+            if len(file_scores) != 0:
+                max_score = max(file_scores)
+            else:
+                max_score = 0
+            print(f"Current Score is {curr_score}")
+            print("# P, R, mAP@.5, mAP@.5-.95, val_loss(box, obj, cls)")
+            print(np.array(results).reshape(1, -1))
+            if (epoch + 1) % opt.save_period == 0 and int(curr_score) > int(max_score):
+                ckpt = {'epoch': epoch,
+                        'best_fitness': best_fitness,
+                        'model': deepcopy(de_parallel(model)).half(),
+                        'ema': deepcopy(ema.ema).half(),
+                        'updates': ema.updates,
+                        'optimizer': optimizer.state_dict(),
+                        'wandb_id': loggers.wandb.wandb_run.id if loggers.wandb else None}
+                nametxt = f'{epoch}'+'_'+ f'{curr_score}'+'_' +'best.pt'
+                name = w / nametxt
+                torch.save(ckpt, name)
+                strip_optimizer(f=name,s=name)
             if (not nosave) or (final_epoch and not evolve):  # if save
                 ckpt = {'epoch': epoch,
                         'best_fitness': best_fitness,
@@ -398,6 +432,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                                             save_dir=save_dir,
                                             save_json=True,
                                             plots=False)
+
             # Strip optimizers
             for f in last, best:
                 if f.exists():
@@ -444,6 +479,7 @@ def parse_opt(known=False):
     parser.add_argument('--save_period', type=int, default=-1, help='Log model after every "save_period" epoch')
     parser.add_argument('--artifact_alias', type=str, default="latest", help='version of dataset artifact to be used')
     parser.add_argument('--local_rank', type=int, default=-1, help='DDP parameter, do not modify')
+    parser.add_argument('--save_no', type=str, default="2", help='Number of files to backup')
     opt = parser.parse_known_args()[0] if known else parser.parse_args()
     return opt
 
